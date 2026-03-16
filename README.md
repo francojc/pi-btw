@@ -13,6 +13,7 @@ A small [pi](https://github.com/badlogic/pi-mono) extension that adds a `/btw` s
 - keeps a continuous BTW thread by default
 - supports `/btw:tangent` for a contextless side thread that does not inherit the current main-session conversation
 - opens a focused BTW modal shell with its own composer and transcript
+- keeps the BTW overlay open while you switch focus back to the main editor with `Alt+/`
 - keeps BTW thread entries out of the main agent's future context
 - lets you inject the full thread, or a summary of it, back into the main agent
 - optionally saves an individual BTW exchange as a visible session note with `--save`
@@ -68,6 +69,13 @@ pi install /absolute/path/to/pi-btw
 - streams into the BTW modal transcript/status surface
 - persists the BTW exchange as hidden thread state
 - with `--save`, also saves that single exchange as a visible session note
+
+## Overlay controls
+
+- `Alt+/` toggles focus between BTW and the main editor without closing the overlay
+- `Ctrl+Alt+W` is a fallback focus toggle for terminals that do not deliver `Alt+/` as a usable shortcut
+- `Esc` still dismisses BTW immediately while the overlay is focused
+- BTW now opens top-centered so the main session remains visible underneath it
 
 ### `/btw:new [question]`
 

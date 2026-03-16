@@ -31,6 +31,11 @@ import {
 const BTW_MESSAGE_TYPE = "btw-note";
 const BTW_ENTRY_TYPE = "btw-thread-entry";
 const BTW_RESET_TYPE = "btw-thread-reset";
+const BTW_FOCUS_SHORTCUTS = [Key.alt("/"), Key.ctrlAlt("w")] as const;
+
+function matchesBtwFocusShortcut(data: string): boolean {
+  return BTW_FOCUS_SHORTCUTS.some((shortcut) => matchesKey(data, shortcut));
+}
 
 const BTW_SYSTEM_PROMPT = [
   "You are having an aside conversation with the user, separate from their main working session.",
@@ -940,6 +945,7 @@ class BtwOverlayComponent extends Container implements Focusable {
   private readonly getMode: () => BtwThreadMode;
   private readonly onSubmitCallback: (value: string) => void;
   private readonly onDismissCallback: () => void;
+  private readonly onUnfocusCallback: () => void;
   private readonly tui: TUI;
   private readonly theme: ExtensionContext["ui"]["theme"];
   private transcriptLines: string[] = [];
@@ -966,6 +972,7 @@ class BtwOverlayComponent extends Container implements Focusable {
     getMode: () => BtwThreadMode,
     onSubmit: (value: string) => void,
     onDismiss: () => void,
+    onUnfocus: () => void,
   ) {
     super();
     this.tui = tui;
@@ -975,6 +982,7 @@ class BtwOverlayComponent extends Container implements Focusable {
     this.getMode = getMode;
     this.onSubmitCallback = onSubmit;
     this.onDismissCallback = onDismiss;
+    this.onUnfocusCallback = onUnfocus;
 
     this.modeText = new Text("", 1, 0);
     this.summaryText = new Text("", 1, 0);
@@ -1034,10 +1042,15 @@ class BtwOverlayComponent extends Container implements Focusable {
 
   private getDialogHeight(): number {
     const terminalRows = process.stdout.rows ?? 30;
-    return Math.max(16, Math.min(24, Math.floor(terminalRows * 0.7)));
+    return Math.max(18, Math.min(32, Math.floor(terminalRows * 0.78)));
   }
 
   handleInput(data: string): void {
+    if (matchesBtwFocusShortcut(data)) {
+      this.onUnfocusCallback();
+      return;
+    }
+
     if (matchesKey(data, Key.pageUp)) {
       this.followTranscript = false;
       this.transcriptScrollOffset = Math.max(0, this.transcriptScrollOffset - Math.max(1, this.transcriptViewportHeight - 1));
@@ -1151,7 +1164,7 @@ class BtwOverlayComponent extends Container implements Focusable {
 
     const status = this.getStatus() ?? "Ready. Enter submits; Escape dismisses without clearing.";
     this.statusText.setText(status);
-    this.hintsText.setText("Enter submit · Escape dismiss · PgUp/PgDn scroll · /btw:clear resets thread");
+    this.hintsText.setText("Enter submit · Alt+/ toggle focus · Escape dismiss · PgUp/PgDn scroll");
     this.tui.requestRender();
   }
 }
@@ -1187,6 +1200,32 @@ export default function (pi: ExtensionAPI) {
   function dismissOverlay(): void {
     overlayRuntime?.close?.();
     overlayRuntime = null;
+  }
+
+  function toggleOverlayFocus(): void {
+    const handle = overlayRuntime?.handle;
+    if (!handle) {
+      return;
+    }
+
+    handle.setHidden(false);
+    if (handle.isFocused()) {
+      handle.unfocus();
+    } else {
+      handle.focus();
+    }
+    overlayRuntime?.refresh?.();
+  }
+
+  function focusOverlay(): void {
+    const handle = overlayRuntime?.handle;
+    if (!handle) {
+      return;
+    }
+
+    handle.setHidden(false);
+    handle.focus();
+    overlayRuntime?.refresh?.();
   }
 
   function removeBtwSessionSubscription(sessionRuntime: BtwSessionRuntime, unsubscribe: () => void): void {
@@ -1318,9 +1357,7 @@ export default function (pi: ExtensionAPI) {
 
     if (overlayRuntime?.handle) {
       subscribeOverlayToActiveBtwSession(ctx);
-      overlayRuntime.handle.setHidden(false);
-      overlayRuntime.handle.focus();
-      overlayRuntime.refresh?.();
+      focusOverlay();
       return;
     }
 
@@ -1363,6 +1400,10 @@ export default function (pi: ExtensionAPI) {
             () => {
               void dismissOverlaySession();
             },
+            () => {
+              overlayRuntime?.handle?.unfocus();
+              overlayRuntime?.refresh?.();
+            },
           );
 
           overlay.focused = runtime.handle?.isFocused() ?? true;
@@ -1393,8 +1434,9 @@ export default function (pi: ExtensionAPI) {
             width: "78%",
             minWidth: 72,
             maxHeight: "78%",
-            anchor: "center",
-            margin: 1,
+            anchor: "top-center",
+            margin: { top: 1, left: 2, right: 2 },
+            nonCapturing: true,
           },
           onHandle: (handle) => {
             runtime.handle = handle;
@@ -1835,6 +1877,15 @@ export default function (pi: ExtensionAPI) {
     await disposeBtwSession();
     dismissOverlay();
   });
+
+  for (const shortcut of BTW_FOCUS_SHORTCUTS) {
+    pi.registerShortcut(shortcut, {
+      description: "Toggle BTW overlay focus while leaving it open.",
+      handler: async (_args, _ctx) => {
+        toggleOverlayFocus();
+      },
+    });
+  }
 
   pi.registerCommand("btw", {
     description: "Continue a side conversation in a focused BTW modal. Add --save to also persist a visible note.",

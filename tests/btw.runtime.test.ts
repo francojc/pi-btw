@@ -451,6 +451,7 @@ function createHarness(
   } = {},
 ) {
   const commands = new Map<string, RegisteredCommand>();
+  const shortcuts = new Map<string, any>();
   const handlers = new Map<string, Function[]>();
   const entries: SessionEntry[] = [...initialEntries];
   const notifications: Array<{ message: string; type?: string }> = [];
@@ -532,7 +533,9 @@ function createHarness(
     registerCommand: ((name: string, options: any) => {
       commands.set(name, { name, ...options } as RegisteredCommand);
     }) as any,
-    registerShortcut: vi.fn() as any,
+    registerShortcut: ((shortcut: string, options: any) => {
+      shortcuts.set(shortcut, options);
+    }) as any,
     registerFlag: vi.fn() as any,
     getFlag: vi.fn() as any,
     registerMessageRenderer: vi.fn() as any,
@@ -586,6 +589,12 @@ function createHarness(
     await cmd.handler(args, baseCtx as unknown as ExtensionCommandContext);
   }
 
+  async function shortcut(name: string) {
+    const registered = shortcuts.get(name);
+    if (!registered) throw new Error(`Missing shortcut: ${name}`);
+    await registered.handler(undefined, baseCtx as unknown as ExtensionContext);
+  }
+
   function latestOverlayComponent() {
     const overlay = overlays.at(-1)?.component;
     if (!overlay) throw new Error("Overlay not created");
@@ -623,6 +632,7 @@ function createHarness(
     runSessionStart,
     runEvent,
     command,
+    shortcut,
     latestOverlayComponent,
     latestWidgetFactory,
     startMainSessionInput,
@@ -1154,15 +1164,45 @@ describe("btw runtime behavior", () => {
     });
   });
 
-  it("keeps BTW in an overlay and does not leave a persistent widget above the main input", async () => {
+  it("keeps BTW in a top-centered non-capturing overlay and does not leave a persistent widget above the main input", async () => {
     const harness = createHarness();
     promptStreamMock.mockImplementation(() => streamAnswer("Overlay answer"));
 
     await harness.runSessionStart();
     await harness.command("btw", "overlay question");
 
-    expect(harness.overlays.at(-1)?.factoryOptions).toMatchObject({ overlay: true });
+    expect(harness.overlays.at(-1)?.factoryOptions).toMatchObject({
+      overlay: true,
+      overlayOptions: {
+        anchor: "top-center",
+        nonCapturing: true,
+      },
+    });
     expect(harness.widgets.some((entry) => entry.key === "btw" && typeof entry.content === "function")).toBe(false);
+  });
+
+  it("toggles BTW overlay focus with the registered focus shortcuts without closing it", async () => {
+    const harness = createHarness();
+
+    await harness.runSessionStart();
+    await harness.command("btw", "");
+
+    const overlay = harness.latestOverlayComponent();
+    const handle = harness.overlayHandles.at(-1);
+    expect(handle?.isFocused()).toBe(true);
+    expect(overlay.focused).toBe(true);
+
+    overlay.handleInput("\u001b\u0017");
+
+    expect(handle?.isFocused()).toBe(false);
+    expect(handle?.isHidden()).toBe(false);
+    expect(overlay.focused).toBe(false);
+
+    await harness.shortcut("ctrl+alt+w");
+
+    expect(handle?.isFocused()).toBe(true);
+    expect(handle?.isHidden()).toBe(false);
+    expect(overlay.focused).toBe(true);
   });
 
   it("marks the overlay input focused when BTW opens so the cursor stays in the composer", async () => {
