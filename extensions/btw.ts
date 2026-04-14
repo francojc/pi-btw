@@ -1678,9 +1678,9 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    const apiKey = await ctx.modelRegistry.getApiKey(model);
-    if (!apiKey) {
-      const message = `No credentials available for ${model.provider}/${model.id}.`;
+    const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+    if (!auth.ok || !auth.apiKey) {
+      const message = auth.ok ? `No credentials available for ${model.provider}/${model.id}.` : auth.error;
       setOverlayStatus(message, ctx);
       notify(ctx, message, "error");
       await ensureOverlay(ctx);
@@ -1783,9 +1783,9 @@ export default function (pi: ExtensionAPI) {
       throw new Error("No active model selected.");
     }
 
-    const apiKey = await ctx.modelRegistry.getApiKey(model);
-    if (!apiKey) {
-      throw new Error(`No credentials available for ${model.provider}/${model.id}.`);
+    const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+    if (!auth.ok || !auth.apiKey) {
+      throw new Error(auth.ok ? `No credentials available for ${model.provider}/${model.id}.` : auth.error);
     }
 
     const { session } = await createAgentSession({

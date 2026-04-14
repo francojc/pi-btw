@@ -563,7 +563,9 @@ function createHarness(
     ui: ui as any,
     sessionManager: sessionManager as any,
     modelRegistry: {
-      getApiKey: vi.fn(async () => (hasCredentials ? "test-key" : undefined)),
+      getApiKeyAndHeaders: vi.fn(async () =>
+        hasCredentials ? { ok: true, apiKey: "test-key", headers: undefined } : { ok: true, apiKey: undefined, headers: undefined },
+      ),
     },
     model,
     getSystemPrompt: () => "system",
