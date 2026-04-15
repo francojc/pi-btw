@@ -1371,7 +1371,7 @@ describe("btw runtime behavior", () => {
     });
   });
 
-  it("keeps BTW in a right-side non-capturing overlay and does not leave a persistent widget above the main input", async () => {
+  it("keeps BTW in a top-centered non-capturing overlay and does not leave a persistent widget above the main input", async () => {
     const harness = createHarness();
     promptStreamMock.mockImplementation(() => streamAnswer("Overlay answer"));
 
@@ -1381,7 +1381,7 @@ describe("btw runtime behavior", () => {
     expect(harness.overlays.at(-1)?.factoryOptions).toMatchObject({
       overlay: true,
       overlayOptions: {
-        anchor: "right-center",
+        anchor: "top-center",
         nonCapturing: true,
       },
     });

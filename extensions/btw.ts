@@ -1733,13 +1733,11 @@ export default function (pi: ExtensionAPI) {
         {
           overlay: true,
           overlayOptions: {
-            width: "42%",
-            minWidth: 44,
-            maxWidth: 72,
-            maxHeight: "92%",
-            anchor: "right-center",
-            margin: { top: 1, bottom: 1, left: 1, right: 1 },
-            visible: (termWidth) => termWidth >= 90,
+            width: "78%",
+            minWidth: 72,
+            maxHeight: "78%",
+            anchor: "top-center",
+            margin: { top: 1, left: 2, right: 2 },
             nonCapturing: true,
           },
           onHandle: (handle) => {

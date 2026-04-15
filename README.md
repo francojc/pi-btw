@@ -30,7 +30,7 @@ pi install npm:pi-btw
 ### From git
 
 ```bash
-pi install git:github.com/dbachelder/pi-btw
+pi install git:github.com/francojc/pi-btw
 ```
 
 Then reload pi:
@@ -78,7 +78,7 @@ pi install /absolute/path/to/pi-btw
 - the BTW focus-toggle shortcut is configurable through Pi's `~/.pi/agent/keybindings.json` under `btw.overlay.toggleFocus`
 - default bindings are `Alt+/` and `Ctrl+Alt+W`
 - `Esc` still dismisses BTW immediately while the overlay is focused
-- BTW now opens as a compact right-side panel so the main session remains visible beside it
+- BTW opens top-centered so the main session remains visible underneath it
 
 ### `/btw:new [question]`
 
