@@ -473,7 +473,27 @@ function createHarness(
     bold: (text: string) => text,
   };
   const keybindings = {
-    matches: (_data: string, _id: string) => false,
+    matches: (data: string, id: string) => {
+      if (id === "tui.select.cancel") {
+        return data === "escape" || data === "\u001b" || data === "ctrl+c";
+      }
+      if (id === "tui.select.pageUp" || id === "tui.editor.pageUp") {
+        return data === "pageUp";
+      }
+      if (id === "tui.select.pageDown" || id === "tui.editor.pageDown") {
+        return data === "pageDown";
+      }
+      if (id === "btw.overlay.toggleFocus") {
+        return data === "\u001b/" || data === "\u001b\u0017";
+      }
+      return false;
+    },
+    getKeys: (id: string) => {
+      if (id === "btw.overlay.toggleFocus") {
+        return ["alt+/", "ctrl+alt+w"];
+      }
+      return [];
+    },
   };
 
   const sessionManager = {
@@ -509,7 +529,7 @@ function createHarness(
       overlays.push({ factoryOptions: options, done, component });
       return resultPromise;
     },
-    onTerminalInput: () => () => {},
+    onTerminalInput: (_handler: any) => () => {},
     setStatus: () => {},
     setWorkingMessage: () => {},
     setFooter: () => {},
@@ -1351,7 +1371,7 @@ describe("btw runtime behavior", () => {
     });
   });
 
-  it("keeps BTW in a top-centered non-capturing overlay and does not leave a persistent widget above the main input", async () => {
+  it("keeps BTW in a right-side non-capturing overlay and does not leave a persistent widget above the main input", async () => {
     const harness = createHarness();
     promptStreamMock.mockImplementation(() => streamAnswer("Overlay answer"));
 
@@ -1361,14 +1381,14 @@ describe("btw runtime behavior", () => {
     expect(harness.overlays.at(-1)?.factoryOptions).toMatchObject({
       overlay: true,
       overlayOptions: {
-        anchor: "top-center",
+        anchor: "right-center",
         nonCapturing: true,
       },
     });
     expect(harness.widgets.some((entry) => entry.key === "btw" && typeof entry.content === "function")).toBe(false);
   });
 
-  it("toggles BTW overlay focus with the registered focus shortcuts without closing it", async () => {
+  it("toggles BTW overlay focus with the registered default shortcuts without closing it", async () => {
     const harness = createHarness();
 
     await harness.runSessionStart();
@@ -1404,6 +1424,19 @@ describe("btw runtime behavior", () => {
     expect(overlay.input.focused).toBe(true);
   });
 
+  it("uses Pi keybindings config for BTW-specific focus-toggle hints and matching", async () => {
+    const harness = createHarness();
+
+    await harness.runSessionStart();
+    await harness.command("btw", "");
+
+    const overlay = harness.latestOverlayComponent();
+    expect(overlay['hintsText'].text).toContain("alt+/ctrl+alt+w focus");
+
+    overlay.handleInput("\u001b\u0017");
+    expect(harness.overlayHandles.at(-1)?.isFocused()).toBe(false);
+  });
+
   it("forwards terminal input from the focused overlay to the embedded BTW input", async () => {
     const harness = createHarness();
 
@@ -1418,7 +1451,7 @@ describe("btw runtime behavior", () => {
     expect(inputHandleSpy).toHaveBeenCalledWith("abc");
   });
 
-  it("renders BTW as a bordered dialog with an internal transcript viewport", async () => {
+  it("renders BTW as a bordered side panel with an internal transcript viewport", async () => {
     const harness = createHarness();
     const longAnswer = Array.from({ length: 24 }, (_, index) => `line ${index + 1} of a long answer`).join("\n");
 
@@ -1444,7 +1477,7 @@ describe("btw runtime behavior", () => {
     expect(firstRender.length).toBe(secondRender.length);
   });
 
-  it("keeps the BTW modal at a fixed reading height, uses one frame color, and preserves stacked body indentation", async () => {
+  it("keeps the BTW panel at a fixed reading height, uses one frame color, and preserves stacked body indentation", async () => {
     const harness = createHarness([], {
       theme: {
         fg: (name: string, text: string) => `<fg:${name}>${text}</fg:${name}>`,
@@ -1466,7 +1499,7 @@ describe("btw runtime behavior", () => {
 
     const populatedLines = overlay.render(80);
     const emptyStateLine = emptyLines.find((line: string) => line.includes("No BTW thread yet."));
-    const inputLine = populatedLines.at(-3);
+    const inputLine = populatedLines.at(-2);
     const assistantBodyLine = populatedLines.find((line: string) => line.includes("First answer"));
 
     expect(emptyLines.length).toBe(populatedLines.length);
@@ -1755,7 +1788,7 @@ describe("btw runtime behavior", () => {
     expect(record.session.abort).not.toHaveBeenCalled();
     expect(record.getListenerCount()).toBe(1);
     expect(overlayHandle?.isHidden()).toBe(false);
-    expect(overlay.statusText.text).toContain("Ready. Enter submits; Escape dismisses without clearing.");
+    expect(overlay.statusText.text).toContain("Ready.");
     expect(transcriptText(overlay)).toContain("No BTW thread yet. Ask a side question to start one.");
     expect(harness.notifications.at(-1)).toEqual({
       message: "No BTW thread to inject.",

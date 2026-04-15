@@ -1,8 +1,11 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   buildSessionContext,
   createAgentSession,
   createExtensionRuntime,
   codingTools,
+  getAgentDir,
   SessionManager,
   type AgentSession,
   type AgentSessionEvent,
@@ -17,26 +20,74 @@ import {
   Container,
   Input,
   Key,
+  KeybindingsManager as TuiKeybindingsManager,
   Text,
-  matchesKey,
   truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
   type Focusable,
+  type KeybindingDefinitions,
+  type KeybindingsConfig,
   type KeybindingsManager,
   type OverlayHandle,
   type TUI,
 } from "@mariozechner/pi-tui";
+
+declare module "@mariozechner/pi-tui" {
+  interface Keybindings {
+    "btw.overlay.toggleFocus": true;
+  }
+}
 
 const BTW_MESSAGE_TYPE = "btw-note";
 const BTW_ENTRY_TYPE = "btw-thread-entry";
 const BTW_RESET_TYPE = "btw-thread-reset";
 const BTW_MODEL_OVERRIDE_TYPE = "btw-model-override";
 const BTW_THINKING_OVERRIDE_TYPE = "btw-thinking-override";
-const BTW_FOCUS_SHORTCUTS = [Key.alt("/"), Key.ctrlAlt("w")] as const;
+const BTW_KEYBINDINGS: KeybindingDefinitions = {
+  "btw.overlay.toggleFocus": {
+    defaultKeys: [Key.alt("/"), Key.ctrlAlt("w")],
+    description: "Toggle BTW overlay focus",
+  },
+};
 
-function matchesBtwFocusShortcut(data: string): boolean {
-  return BTW_FOCUS_SHORTCUTS.some((shortcut) => matchesKey(data, shortcut));
+type BtwKeybindingId = keyof typeof BTW_KEYBINDINGS;
+
+function loadBtwKeybindingsConfig(agentDir = getAgentDir()): KeybindingsConfig {
+  const configPath = join(agentDir, "keybindings.json");
+  if (!existsSync(configPath)) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(readFileSync(configPath, "utf-8")) as Record<string, unknown>;
+    const config: KeybindingsConfig = {};
+
+    for (const key of Object.keys(BTW_KEYBINDINGS) as BtwKeybindingId[]) {
+      const value = parsed[key];
+      if (typeof value === "string") {
+        config[key] = value;
+      } else if (Array.isArray(value) && value.every((entry) => typeof entry === "string")) {
+        config[key] = value;
+      }
+    }
+
+    return config;
+  } catch {
+    return {};
+  }
+}
+
+function createBtwKeybindingsManager(): TuiKeybindingsManager {
+  return new TuiKeybindingsManager(BTW_KEYBINDINGS, loadBtwKeybindingsConfig());
+}
+
+function formatKeyList(keys: string[]): string {
+  if (keys.length === 0) {
+    return "unbound";
+  }
+
+  return keys.join("/");
 }
 
 const BTW_SYSTEM_PROMPT = [
@@ -147,6 +198,7 @@ type OverlayRuntime = {
   close?: () => void;
   finish?: () => void;
   setDraft?: (value: string) => void;
+  terminalInputUnsubscribe?: () => void;
   closed?: boolean;
 };
 
@@ -1025,6 +1077,8 @@ class BtwOverlayComponent extends Container implements Focusable {
   private readonly onUnfocusCallback: () => void;
   private readonly tui: TUI;
   private readonly theme: ExtensionContext["ui"]["theme"];
+  private readonly keybindings: KeybindingsManager;
+  private readonly btwKeybindings: TuiKeybindingsManager;
   private transcriptLines: string[] = [];
   private transcriptScrollOffset = 0;
   private transcriptViewportHeight = 8;
@@ -1048,6 +1102,7 @@ class BtwOverlayComponent extends Container implements Focusable {
     tui: TUI,
     theme: ExtensionContext["ui"]["theme"],
     keybindings: KeybindingsManager,
+    btwKeybindings: TuiKeybindingsManager,
     readTranscriptEntries: () => BtwTranscript,
     getStatus: () => string | null,
     getMode: () => BtwThreadMode,
@@ -1058,6 +1113,8 @@ class BtwOverlayComponent extends Container implements Focusable {
     super();
     this.tui = tui;
     this.theme = theme;
+    this.keybindings = keybindings;
+    this.btwKeybindings = btwKeybindings;
     this.readTranscriptEntries = readTranscriptEntries;
     this.getStatus = getStatus;
     this.getMode = getMode;
@@ -1123,23 +1180,23 @@ class BtwOverlayComponent extends Container implements Focusable {
 
   private getDialogHeight(): number {
     const terminalRows = process.stdout.rows ?? 30;
-    return Math.max(18, Math.min(32, Math.floor(terminalRows * 0.78)));
+    return Math.max(18, Math.min(terminalRows - 2, Math.floor(terminalRows * 0.92)));
   }
 
   handleInput(data: string): void {
-    if (matchesBtwFocusShortcut(data)) {
+    if (this.btwKeybindings.matches(data, "btw.overlay.toggleFocus")) {
       this.onUnfocusCallback();
       return;
     }
 
-    if (matchesKey(data, Key.pageUp)) {
+    if (this.keybindings.matches(data, "tui.select.pageUp") || this.keybindings.matches(data, "tui.editor.pageUp")) {
       this.followTranscript = false;
       this.transcriptScrollOffset = Math.max(0, this.transcriptScrollOffset - Math.max(1, this.transcriptViewportHeight - 1));
       this.tui.requestRender();
       return;
     }
 
-    if (matchesKey(data, Key.pageDown)) {
+    if (this.keybindings.matches(data, "tui.select.pageDown") || this.keybindings.matches(data, "tui.editor.pageDown")) {
       this.transcriptScrollOffset += Math.max(1, this.transcriptViewportHeight - 1);
       this.tui.requestRender();
       return;
@@ -1165,12 +1222,12 @@ class BtwOverlayComponent extends Container implements Focusable {
   }
 
   override render(width: number): string[] {
-    const dialogWidth = Math.max(24, width);
-    const innerWidth = Math.max(22, dialogWidth - 2);
+    const dialogWidth = Math.max(36, width);
+    const innerWidth = Math.max(34, dialogWidth - 2);
     const transcriptLines = this.wrapTranscript(innerWidth);
     const dialogHeight = this.getDialogHeight();
-    const chromeHeight = 8;
-    const transcriptHeight = Math.max(6, dialogHeight - chromeHeight);
+    const chromeHeight = 6;
+    const transcriptHeight = Math.max(8, dialogHeight - chromeHeight);
     this.transcriptViewportHeight = transcriptHeight;
 
     const maxScroll = Math.max(0, transcriptLines.length - transcriptHeight);
@@ -1197,8 +1254,12 @@ class BtwOverlayComponent extends Container implements Focusable {
 
     const lines = [this.borderLine(innerWidth, "top")];
 
-    lines.push(this.frameLine(this.theme.fg("accent", this.theme.bold(this.modeTextValue.trim())), innerWidth));
-    lines.push(this.frameLine(this.theme.fg("dim", summary), innerWidth));
+    lines.push(
+      this.frameLine(
+        `${this.theme.fg("accent", this.theme.bold(this.modeTextValue.trim()))}${this.theme.fg("dim", `  ${summary}`)}`,
+        innerWidth,
+      ),
+    );
     lines.push(this.ruleLine(innerWidth));
 
     for (const line of visibleTranscript) {
@@ -1209,9 +1270,8 @@ class BtwOverlayComponent extends Container implements Focusable {
     }
 
     lines.push(this.ruleLine(innerWidth));
-    lines.push(this.frameLine(this.theme.fg("warning", this.statusTextValue.trim()), innerWidth));
+    lines.push(this.frameLine(`${this.theme.fg("warning", this.statusTextValue.trim())}${this.theme.fg("dim", `  ${this.hintsTextValue.trim()}`)}`, innerWidth));
     lines.push(this.inputFrameLine(dialogWidth));
-    lines.push(this.frameLine(this.theme.fg("dim", this.hintsTextValue.trim()), innerWidth));
     lines.push(this.borderLine(innerWidth, "bottom"));
 
     return lines;
@@ -1231,12 +1291,13 @@ class BtwOverlayComponent extends Container implements Focusable {
   }
 
   refresh(): void {
-    this.modeTextValue = `${getOverlayTitle(this.getMode())} · hidden thread preserved`;
-    this.modeText.setText(this.modeTextValue);
     const entries = this.readTranscriptEntries();
     const exchanges = getCompletedExchangeCount(entries);
-    const active = hasStreamingTranscriptEntry(entries) ? " · streaming" : " · idle";
-    this.summaryTextValue = `${exchanges} exchange${exchanges === 1 ? "" : "s"}${active}`;
+    const active = hasStreamingTranscriptEntry(entries) ? "streaming" : "idle";
+    const focusToggle = formatKeyList(this.btwKeybindings.getKeys("btw.overlay.toggleFocus"));
+    this.modeTextValue = getOverlayTitle(this.getMode());
+    this.modeText.setText(this.modeTextValue);
+    this.summaryTextValue = `${exchanges}x · ${active}`;
     this.summaryText.setText(this.summaryTextValue);
 
     this.transcriptLines = buildOverlayTranscript(entries, this.theme);
@@ -1245,10 +1306,10 @@ class BtwOverlayComponent extends Container implements Focusable {
       this.transcript.addChild(new Text(line, 1, 0));
     }
 
-    const status = this.getStatus() ?? "Ready. Enter submits; Escape dismisses without clearing.";
+    const status = this.getStatus() ?? "Ready.";
     this.statusTextValue = status;
     this.statusText.setText(this.statusTextValue);
-    this.hintsTextValue = "Enter submit · Alt+/ toggle focus · Escape dismiss · PgUp/PgDn scroll";
+    this.hintsTextValue = `⏎ send · ${focusToggle} focus · esc dismiss · pg↑↓ scroll`;
     this.hintsText.setText(this.hintsTextValue);
     this.tui.requestRender();
   }
@@ -1265,6 +1326,7 @@ export default function (pi: ExtensionAPI) {
   let overlayRuntime: OverlayRuntime | null = null;
   let lastUiContext: ExtensionContext | ExtensionCommandContext | null = null;
   let activeBtwSession: BtwSessionRuntime | null = null;
+  let btwKeybindings = createBtwKeybindingsManager();
 
   function syncUi(ctx?: ExtensionContext | ExtensionCommandContext): void {
     const activeCtx = ctx ?? lastUiContext;
@@ -1285,6 +1347,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   function dismissOverlay(): void {
+    overlayRuntime?.terminalInputUnsubscribe?.();
     overlayRuntime?.close?.();
     overlayRuntime = null;
   }
@@ -1589,6 +1652,7 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       runtime.closed = true;
+      runtime.terminalInputUnsubscribe?.();
       if (activeBtwSession) {
         clearBtwSessionSubscriptions(activeBtwSession);
       }
@@ -1613,6 +1677,7 @@ export default function (pi: ExtensionAPI) {
             tui,
             theme,
             keybindings,
+            btwKeybindings,
             () => transcriptState.entries,
             () => overlayStatus,
             () => pendingMode,
@@ -1644,6 +1709,21 @@ export default function (pi: ExtensionAPI) {
 
           subscribeOverlayToActiveBtwSession(ctx);
 
+          if (!runtime.terminalInputUnsubscribe) {
+            runtime.terminalInputUnsubscribe = ctx.ui.onTerminalInput((data) => {
+              if (!overlayRuntime?.handle) {
+                return undefined;
+              }
+
+              if (btwKeybindings.matches(data, "btw.overlay.toggleFocus")) {
+                toggleOverlayFocus();
+                return { consume: true };
+              }
+
+              return undefined;
+            });
+          }
+
           if (runtime.closed) {
             done();
           }
@@ -1653,11 +1733,13 @@ export default function (pi: ExtensionAPI) {
         {
           overlay: true,
           overlayOptions: {
-            width: "78%",
-            minWidth: 72,
-            maxHeight: "78%",
-            anchor: "top-center",
-            margin: { top: 1, left: 2, right: 2 },
+            width: "42%",
+            minWidth: 44,
+            maxWidth: 72,
+            maxHeight: "92%",
+            anchor: "right-center",
+            margin: { top: 1, bottom: 1, left: 1, right: 1 },
+            visible: (termWidth) => termWidth >= 90,
             nonCapturing: true,
           },
           onHandle: (handle) => {
@@ -2153,10 +2235,12 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    btwKeybindings = createBtwKeybindingsManager();
     await restoreThread(ctx);
   });
 
   pi.on("session_tree", async (_event, ctx) => {
+    btwKeybindings = createBtwKeybindingsManager();
     await restoreThread(ctx);
   });
 
@@ -2165,7 +2249,7 @@ export default function (pi: ExtensionAPI) {
     dismissOverlay();
   });
 
-  for (const shortcut of BTW_FOCUS_SHORTCUTS) {
+  for (const shortcut of BTW_KEYBINDINGS["btw.overlay.toggleFocus"].defaultKeys as string[]) {
     pi.registerShortcut(shortcut, {
       description: "Toggle BTW overlay focus while leaving it open.",
       handler: async (_ctx) => {

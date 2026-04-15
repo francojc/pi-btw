@@ -75,10 +75,10 @@ pi install /absolute/path/to/pi-btw
 
 ## Overlay controls
 
-- `Alt+/` toggles focus between BTW and the main editor without closing the overlay
-- `Ctrl+Alt+W` is a fallback focus toggle for terminals that do not deliver `Alt+/` as a usable shortcut
+- the BTW focus-toggle shortcut is configurable through Pi's `~/.pi/agent/keybindings.json` under `btw.overlay.toggleFocus`
+- default bindings are `Alt+/` and `Ctrl+Alt+W`
 - `Esc` still dismisses BTW immediately while the overlay is focused
-- BTW now opens top-centered so the main session remains visible underneath it
+- BTW now opens as a compact right-side panel so the main session remains visible beside it
 
 ### `/btw:new [question]`
 
@@ -181,6 +181,22 @@ Sometimes you want to:
 This package also ships a small `btw` skill so pi can better recognize when a side-conversation workflow is appropriate.
 
 It helps with discoverability and guidance, but it is not required for the extension itself to work.
+
+## Keybindings
+
+BTW adds one Pi-style keybinding id that you can override in your normal Pi keybindings config:
+
+```json
+{
+  "btw.overlay.toggleFocus": ["alt+/", "ctrl+alt+w"]
+}
+```
+
+After editing `keybindings.json`, run:
+
+```text
+/reload
+```
 
 ## Development
 
