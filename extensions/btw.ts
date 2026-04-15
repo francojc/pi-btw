@@ -50,6 +50,7 @@ const BTW_KEYBINDINGS: KeybindingDefinitions = {
     description: "Toggle BTW overlay focus",
   },
 };
+const BTW_OVERLAY_MAX_HEIGHT_PERCENT = 78;
 
 type BtwKeybindingId = keyof typeof BTW_KEYBINDINGS;
 
@@ -87,7 +88,12 @@ function formatKeyList(keys: string[]): string {
     return "unbound";
   }
 
-  return keys.join("/");
+  return keys.reduce((joined, key) => {
+    if (!joined) {
+      return key;
+    }
+    return joined.endsWith("/") ? `${joined}${key}` : `${joined}/${key}`;
+  }, "");
 }
 
 const BTW_SYSTEM_PROMPT = [
@@ -1089,6 +1095,31 @@ class BtwOverlayComponent extends Container implements Focusable {
   private statusTextValue = "";
   private hintsTextValue = "";
 
+  private matchesBtwToggle(data: string): boolean {
+    try {
+      if (this.keybindings.matches(data, "btw.overlay.toggleFocus")) {
+        return true;
+      }
+    } catch {
+      // Fall back to the BTW-local keybinding manager below.
+    }
+
+    return this.btwKeybindings.matches(data, "btw.overlay.toggleFocus");
+  }
+
+  private getBtwToggleKeys(): string[] {
+    try {
+      const keys = this.keybindings.getKeys("btw.overlay.toggleFocus");
+      if (keys.length > 0) {
+        return keys;
+      }
+    } catch {
+      // Fall back to the BTW-local keybinding manager below.
+    }
+
+    return this.btwKeybindings.getKeys("btw.overlay.toggleFocus");
+  }
+
   get focused(): boolean {
     return this._focused;
   }
@@ -1180,11 +1211,11 @@ class BtwOverlayComponent extends Container implements Focusable {
 
   private getDialogHeight(): number {
     const terminalRows = process.stdout.rows ?? 30;
-    return Math.max(18, Math.min(terminalRows - 2, Math.floor(terminalRows * 0.92)));
+    return Math.max(18, Math.min(terminalRows - 2, Math.floor((terminalRows * BTW_OVERLAY_MAX_HEIGHT_PERCENT) / 100)));
   }
 
   handleInput(data: string): void {
-    if (this.btwKeybindings.matches(data, "btw.overlay.toggleFocus")) {
+    if (this.matchesBtwToggle(data)) {
       this.onUnfocusCallback();
       return;
     }
@@ -1214,8 +1245,10 @@ class BtwOverlayComponent extends Container implements Focusable {
     // the row stays geometrically stable while the overlay still owns keyboard input.
     this.input.focused = false;
     try {
-      const inputLine = this.input.render(targetWidth)[0] ?? "";
-      return `${this.theme.fg("borderMuted", "│")}${inputLine}${this.theme.fg("borderMuted", "│")}`;
+      const renderedInputLine = this.input.render(targetWidth)[0] ?? "";
+      const inputLine = truncateToWidth(renderedInputLine, targetWidth, "");
+      const padding = Math.max(0, targetWidth - visibleWidth(inputLine));
+      return `${this.theme.fg("borderMuted", "│")}${inputLine}${" ".repeat(padding)}${this.theme.fg("borderMuted", "│")}`;
     } finally {
       this.input.focused = previousFocused;
     }
@@ -1226,7 +1259,7 @@ class BtwOverlayComponent extends Container implements Focusable {
     const innerWidth = Math.max(34, dialogWidth - 2);
     const transcriptLines = this.wrapTranscript(innerWidth);
     const dialogHeight = this.getDialogHeight();
-    const chromeHeight = 6;
+    const chromeHeight = 7;
     const transcriptHeight = Math.max(8, dialogHeight - chromeHeight);
     this.transcriptViewportHeight = transcriptHeight;
 
@@ -1294,7 +1327,7 @@ class BtwOverlayComponent extends Container implements Focusable {
     const entries = this.readTranscriptEntries();
     const exchanges = getCompletedExchangeCount(entries);
     const active = hasStreamingTranscriptEntry(entries) ? "streaming" : "idle";
-    const focusToggle = formatKeyList(this.btwKeybindings.getKeys("btw.overlay.toggleFocus"));
+    const focusToggle = formatKeyList(this.getBtwToggleKeys());
     this.modeTextValue = getOverlayTitle(this.getMode());
     this.modeText.setText(this.modeTextValue);
     this.summaryTextValue = `${exchanges}x · ${active}`;
@@ -1735,7 +1768,7 @@ export default function (pi: ExtensionAPI) {
           overlayOptions: {
             width: "78%",
             minWidth: 72,
-            maxHeight: "78%",
+            maxHeight: `${BTW_OVERLAY_MAX_HEIGHT_PERCENT}%`,
             anchor: "top-center",
             margin: { top: 1, left: 2, right: 2 },
             nonCapturing: true,

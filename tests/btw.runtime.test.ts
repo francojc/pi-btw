@@ -1514,6 +1514,24 @@ describe("btw runtime behavior", () => {
     expect(inputLine).not.toContain("\x1b_pi:c\x07");
   });
 
+  it("pads the embedded input row so the right border stays aligned", async () => {
+    const harness = createHarness();
+
+    await harness.runSessionStart();
+    await harness.command("btw", "");
+
+    const overlay = harness.latestOverlayComponent();
+    overlay.input.setValue("typed text");
+
+    const lines = overlay.render(80);
+    const inputLine = lines.at(-2);
+
+    expect(inputLine).toBeDefined();
+    expect(inputLine?.startsWith("│")).toBe(true);
+    expect(inputLine?.endsWith("│")).toBe(true);
+    expect(inputLine).toBe(`│> typed text${" ".repeat(66)}│`);
+  });
+
   it("/btw:new appends a reset marker, disposes the old sub-session, clears prior hidden thread state, stays contextual, and reopens a fresh thread", async () => {
     const harness = createHarness();
     promptStreamMock
